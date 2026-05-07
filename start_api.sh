@@ -5,10 +5,14 @@
 # ─────────────────────────────────────────────
 set -e
 
-# Default venv: look for .venv in project root, then fall back to system Python.
-# Override with --venv /path/to/venv or by setting VENV env var before running.
+# Resolve venv: explicit VENV env var → .venv in project root → ~/tf_env → system Python
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV="${VENV:-$SCRIPT_DIR/.venv}"
+if [[ -z "$VENV" ]]; then
+  if   [[ -f "$SCRIPT_DIR/.venv/bin/activate" ]];  then VENV="$SCRIPT_DIR/.venv"
+  elif [[ -f "$HOME/tf_env/bin/activate" ]];        then VENV="$HOME/tf_env"
+  else VENV=""
+  fi
+fi
 PORT=8000
 RELOAD=""
 SSL=false
@@ -23,12 +27,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Activate virtual environment if it exists, otherwise rely on PATH
-if [[ -f "$VENV/bin/activate" ]]; then
+# Activate virtual environment if found, otherwise bail with a clear message
+if [[ -n "$VENV" && -f "$VENV/bin/activate" ]]; then
   source "$VENV/bin/activate"
 else
-  echo "  Warning: venv not found at $VENV — using system Python."
-  echo "  Run: python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"
+  echo "  Error: no virtual environment found."
+  echo "  Create one with:"
+  echo "    python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"
+  echo "  Or point to an existing one:"
+  echo "    VENV=/path/to/venv ./start_api.sh"
+  exit 1
 fi
 
 export PYTHONPATH="$SCRIPT_DIR"

@@ -2,7 +2,7 @@
 
 A full-stack algorithmic trading research platform built in Python and React.
 
-**FastAPI backend** — backtesting, live paper trading, model training, regime detection  
+**FastAPI backend** — backtesting, paper trading, model training, regime detection  
 **React dashboard** — equity curves, portfolio analytics, signal visualization  
 **Shared-capital portfolio engine** — inverse-vol weighting, regime-conditional allocation, periodic rebalancing
 
@@ -15,8 +15,8 @@ src/
   api/           FastAPI routes, schemas, dependency injection
   execution/     Backtest engine, portfolio engine, paper trading, broker simulation
   features/      Feature pipeline (returns, vol, RSI, SMA, TDA topology)
-  ingestion/     yfinance + Binance REST loaders, Alpaca live feed
-  models/        TCN, TCN-LSTM, TFT, Online (LightGBM/River) regime-conditioned models
+  ingestion/     yfinance + Binance REST historical data loaders
+  models/        TCN, TCN-LSTM, TFT, Online (River) regime-conditioned models
   strategy/      Signal generation, risk management
   storage/       Postgres + Redis persistence
 dashboard/
@@ -40,10 +40,10 @@ pipelines/
 ### 1. Clone and configure environment
 
 ```bash
-git clone https://github.com/<your-username>/quant-trading-system.git
-cd quant-trading-system
+git clone https://github.com/keltonmccormick18/Regime-switching-trading-system.git
+cd Regime-switching-trading-system
 cp .env.example .env
-# Edit .env — set POSTGRES_PASSWORD and optionally ALPACA_* keys
+# Edit .env — set POSTGRES_PASSWORD
 ```
 
 ### 2. Start infrastructure
@@ -98,12 +98,12 @@ With TLS:
 | `TCNModel` | Temporal Convolutional Network |
 | `TCNLSTMModel` | TCN + LSTM hybrid |
 | `TFTModel` | Temporal Fusion Transformer |
-| `OnlineModel` | LightGBM + River online learning |
+| `OnlineModel` | River online learning |
 
 Each model is trained per-regime (`LOW_VOL_BULL`, `LOW_VOL_BEAR`, `HIGH_VOL_BULL`, `HIGH_VOL_BEAR`) using TDA-based topological features and optional cross-asset macro features (VIX, credit spread, USD).
 
 ### Paper Trading
-Real-time paper trading via Alpaca WebSocket feed with the same broker simulation and risk controls as the backtest engine.
+Simulated paper trading engine that replays historical bars with the same broker simulation and risk controls as the backtest engine.
 
 ---
 
@@ -114,8 +114,6 @@ See `.env.example` for all supported variables.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `POSTGRES_PASSWORD` | Yes | Postgres password (matches docker-compose) |
-| `ALPACA_API_KEY` | Paper trading only | Alpaca API key |
-| `ALPACA_SECRET_KEY` | Paper trading only | Alpaca secret key |
 | `PYTORCH_ENABLE_MPS_FALLBACK` | Recommended (Apple Silicon) | Avoids MPS SIGSEGV in attention ops |
 
 ---

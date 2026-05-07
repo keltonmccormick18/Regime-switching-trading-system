@@ -236,48 +236,6 @@ export interface StrategyStatusResponse {
   n_signals:   number
 }
 
-// ─── Paper ────────────────────────────────────────────────────────────────
-
-export interface PaperStartRequest {
-  ticker:              string
-  interval:            '1m' | '5m' | '15m' | '1h' | '1d'
-  broker_preset:       'zero_cost' | 'retail' | 'institutional'
-  initial_capital:     number
-  prediction_interval: number
-  max_drawdown_limit:  number
-  stop_loss_pct:       number
-  latency_ms:          number
-  max_position_pct:    number
-  max_leverage:        number
-  rebalance_threshold: number
-  model_path:          string | null
-}
-
-export interface PaperStatusResponse {
-  ticker:       string
-  running:      boolean
-  bar_count:    number
-  last_bar_ts:  string | null
-  n_orders:     number
-  portfolio:    PortfolioSummary
-  risk_status:  RiskStatus
-  cost_summary: {
-    n_fills:          number
-    total_commission: number
-    total_slippage:   number
-    total_spread:     number
-    total_friction:   number
-    avg_latency_ms:   number
-  }
-  timestamp: string
-}
-
-export interface PaperListItem {
-  ticker:    string
-  running:   boolean
-  bar_count: number
-}
-
 // ─── Portfolio Backtest ────────────────────────────────────────────────────
 
 export interface PortfolioBacktestRequest {

@@ -1,220 +1,176 @@
-import { useEffect, useRef, useState } from 'react'
-import { RefreshCw, Radio } from 'lucide-react'
-import { api } from '../api/client'
-import type {
-  MetricsSummary, PnLPoint, Position, Signal, PaperStatusResponse,
-} from '../types'
-import { MetricsCards }   from '../components/MetricsCards'
-import { PnLChart }       from '../components/PnLChart'
-import { DrawdownChart }  from '../components/DrawdownChart'
-import { SignalChart }    from '../components/SignalChart'
-import { SignalFeed }     from '../components/SignalFeed'
-import { PositionsTable } from '../components/PositionsTable'
+import {
+  BarChart2, BrainCircuit, Cpu, FlaskConical,
+  TrendingUp, Shield, Layers, Activity,
+} from 'lucide-react'
 import { Panel } from '../components/ui'
 
-const MAX_SIGNALS = 120
-const POLL_MS     = 15_000   // refresh paper engine data every 15 s
+// ─── Data ─────────────────────────────────────────────────────────────────
 
-function mergeSignals(a: Signal[], b: Signal[]): Signal[] {
-  const seen = new Set<string>()
-  return [...a, ...b]
-    .filter(s => {
-      const k = `${s.symbol}:${s.timestamp}`
-      if (seen.has(k)) return false
-      seen.add(k); return true
-    })
-    .sort((x, y) => new Date(y.timestamp).getTime() - new Date(x.timestamp).getTime())
-    .slice(0, MAX_SIGNALS)
-}
+const REGIMES = [
+  {
+    name:  'LOW_VOL_BULL',
+    model: 'TCNModel',
+    color: 'text-green-400',
+    bg:    'bg-green-900/20 border-green-800/40',
+    desc:  'Low realised volatility, price above 200-day SMA. Trend-following conditions — the TCN captures multi-scale momentum patterns across short and long receptive fields.',
+  },
+  {
+    name:  'LOW_VOL_BEAR',
+    model: 'TCNLSTMModel',
+    color: 'text-yellow-400',
+    bg:    'bg-yellow-900/20 border-yellow-800/40',
+    desc:  'Low volatility but price below 200-day SMA. The TCN-LSTM hybrid uses sequential memory to model slow mean-reversion dynamics typical of grinding bear markets.',
+  },
+  {
+    name:  'HIGH_VOL_BULL',
+    model: 'TFTModel',
+    color: 'text-blue-400',
+    bg:    'bg-blue-900/20 border-blue-800/40',
+    desc:  'Elevated volatility, price above 200-day SMA. The Temporal Fusion Transformer's multi-head attention excels at non-linear, spike-driven price action in volatile bull runs.',
+  },
+  {
+    name:  'HIGH_VOL_BEAR',
+    model: 'OnlineModel',
+    color: 'text-red-400',
+    bg:    'bg-red-900/20 border-red-800/40',
+    desc:  'High volatility, price below 200-day SMA — the most difficult regime. The River online learner adapts in real time to rapidly shifting distributions where static models degrade fastest.',
+  },
+]
 
-/** Convert PaperStatusResponse portfolio into the MetricsSummary shape MetricsCards expects. */
-function paperToSummary(pe: PaperStatusResponse): MetricsSummary {
-  const p = pe.portfolio
-  return {
-    run_id:       `paper:${pe.ticker}`,
-    ticker:       pe.ticker,
-    sharpe:       p.sharpe,
-    total_return: p.total_return,
-    max_drawdown: p.max_drawdown,
-    win_rate:     0,
-    n_trades:     pe.n_orders,
-    regime:       '',
-    model_used:   '',
-  }
-}
+const FEATURES = [
+  { name: 'logret',        desc: 'Daily log return — primary price signal fed to all models.' },
+  { name: 'vol_20',        desc: '20-bar realised volatility — used for regime detection and inverse-vol position sizing.' },
+  { name: 'rsi_14',        desc: '14-period RSI — momentum oscillator, normalised to [0, 1].' },
+  { name: 'sma_ratio_50',  desc: 'Close / 50-day SMA — short-term trend proxy.' },
+  { name: 'sma_ratio_200', desc: 'Close / 200-day SMA — long-term trend proxy; below 1.0 blocks allocation entirely.' },
+  { name: 'tda_l1',        desc: 'TDA persistence L1 — topological loop lifetime from sliding-window point cloud. Captures cycle structure invisible to linear indicators.' },
+  { name: 'tda_l2',        desc: 'TDA persistence L2 — second-order topological feature for multi-scale shape analysis.' },
+  { name: 'vix_pct',       desc: 'VIX expanding percentile [0,1] — cross-asset fear gauge (macro mode).' },
+  { name: 'credit_spread', desc: 'log(HYG/LQD) — high-yield vs investment-grade spread; widens in risk-off (macro mode).' },
+  { name: 'dxy_ret',       desc: 'UUP log return — USD strength signal (macro mode).' },
+]
 
-/** Convert paper portfolio positions into the Position[] shape PositionsTable expects. */
-function paperToPositions(pe: PaperStatusResponse): Position[] {
-  // PaperStatusResponse doesn't include individual positions — the backend
-  // exposes them via the equity_history field; we surface what's available.
-  return []
-}
+const PORTFOLIO_RULES = [
+  {
+    icon: <TrendingUp size={16} className="text-blue-400 shrink-0 mt-0.5" />,
+    title: 'Inverse-volatility weighting',
+    desc:  'Each ticker\'s target allocation is proportional to 1/vol_20. Low-volatility assets (e.g. TLT, GLD) naturally receive larger shares than high-volatility ones (e.g. NVDA), reducing uncompensated risk concentration.',
+  },
+  {
+    icon: <Shield size={16} className="text-yellow-400 shrink-0 mt-0.5" />,
+    title: '200-SMA trend filter',
+    desc:  'Any ticker trading below its 200-day SMA is excluded from allocation entirely — its capital stays as cash. This prevented TLT allocation during the 2022–2023 rate-hike drawdown.',
+  },
+  {
+    icon: <Activity size={16} className="text-red-400 shrink-0 mt-0.5" />,
+    title: 'Regime-conditional allocation shift',
+    desc:  'Tickers currently in a HIGH_VOL regime receive a 0.5× weight multiplier before re-normalisation. Capital flows toward lower-volatility assets during turbulent markets without any hard overrides.',
+  },
+  {
+    icon: <Layers size={16} className="text-green-400 shrink-0 mt-0.5" />,
+    title: 'Shared capital pool',
+    desc:  'All tickers share one cash balance. Fills carry real cost consequences — a commission paid for NVDA reduces cash available for SPY. Inactive tickers\' allocations remain as cash rather than being redistributed.',
+  },
+]
 
-export function DashboardPage({ signals: wsSignals }: { signals: Signal[] }) {
-  // ── Core dashboard state ──────────────────────────────────────────────────
-  const [summary,    setSummary]    = useState<MetricsSummary | null>(null)
-  const [pnlData,    setPnlData]    = useState<PnLPoint[]>([])
-  const [positions,  setPositions]  = useState<Position[]>([])
-  const [allSignals, setAllSignals] = useState<Signal[]>([])
-  const [histSymbol, setHistSymbol] = useState('AAPL')
-  const [histInput,  setHistInput]  = useState('AAPL')
-  const [histLoad,   setHistLoad]   = useState(false)
+// ─── Component ────────────────────────────────────────────────────────────
 
-  // ── Paper engine state ────────────────────────────────────────────────────
-  const [paperEngines,  setPaperEngines]  = useState<PaperStatusResponse[]>([])
-  const [activeTicker,  setActiveTicker]  = useState<string | null>(null)
-
-  const prevWsLen = useRef(0)
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  async function loadPaperEngines() {
-    try {
-      const list = await api.paperList()
-      if (!list.engines.length) { setPaperEngines([]); return }
-
-      const statuses = await Promise.all(
-        list.engines.map(e => api.paperStatus(e.ticker).catch(() => null))
-      )
-      const live = statuses.filter((s): s is PaperStatusResponse => s !== null)
-      setPaperEngines(live)
-
-      // Pick the engine with the most bars as the "active" one for charts
-      const running = live.filter(e => e.running)
-      const best = running.sort((a, b) => b.bar_count - a.bar_count)[0] ?? live[0]
-      if (best) {
-        setActiveTicker(best.ticker)
-        setSummary(paperToSummary(best))
-        // Fetch its equity curve
-        const eq = await api.paperEquity(best.ticker).catch(() => null)
-        if (eq && eq.length) setPnlData(eq)
-      }
-    } catch { /* non-fatal */ }
-  }
-
-  async function loadFallback() {
-    // Only use generic /summary + /pnl when no paper engine is active
-    if (activeTicker) return
-    api.summary()  .then(s => { if (s) setSummary(s) })           .catch(() => {})
-    api.pnl()      .then(d => { if (d?.length) setPnlData(d) })   .catch(() => {})
-  }
-
-  async function loadPositions() {
-    api.positions().then(r => setPositions(r?.positions ?? [])).catch(() => {})
-  }
-
-  async function loadHistory(symbol: string) {
-    setHistLoad(true)
-    try {
-      const hist = await api.signals(symbol, 60)
-      setAllSignals(prev => mergeSignals(prev, hist ?? []))
-    } catch { /* Redis may be offline */ }
-    finally { setHistLoad(false) }
-  }
-
-  // ── Effects ───────────────────────────────────────────────────────────────
-  useEffect(() => {
-    loadPaperEngines()
-    loadPositions()
-    const id = setInterval(() => { loadPaperEngines(); loadFallback(); loadPositions() }, POLL_MS)
-    return () => clearInterval(id)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => { loadFallback() }, [activeTicker]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => { loadHistory(histSymbol) }, [histSymbol])
-
-  // Merge incoming WebSocket signals
-  useEffect(() => {
-    if (wsSignals.length > prevWsLen.current) {
-      const incoming = wsSignals.slice(0, wsSignals.length - prevWsLen.current)
-      setAllSignals(prev => mergeSignals(incoming, prev))
-    }
-    prevWsLen.current = wsSignals.length
-  }, [wsSignals])
-
-  const runningEngines = paperEngines.filter(e => e.running)
-
+export function DashboardPage() {
   return (
-    <div className="space-y-4">
+    <div className="space-y-6 max-w-5xl">
 
-      {/* ── Paper engine live banner ── */}
-      {runningEngines.length > 0 && (
-        <div className="flex items-center gap-3 flex-wrap">
-          {runningEngines.map(e => (
-            <button
-              key={e.ticker}
-              onClick={() => {
-                setActiveTicker(e.ticker)
-                setSummary(paperToSummary(e))
-                api.paperEquity(e.ticker).then(eq => { if (eq?.length) setPnlData(eq) }).catch(() => {})
-              }}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold
-                          transition-colors cursor-pointer
-                          ${activeTicker === e.ticker
-                            ? 'bg-blue-900/60 border-blue-600 text-blue-300'
-                            : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'}`}
-            >
-              <Radio size={11} className="text-green-400 animate-pulse" />
-              {e.ticker}
-              <span className="text-slate-500 font-normal">
-                {e.bar_count} bars · {e.portfolio.total_return >= 0 ? '+' : ''}
-                {(e.portfolio.total_return * 100).toFixed(2)}%
-              </span>
-            </button>
+      {/* ── Hero ── */}
+      <div className="rounded-xl border border-slate-700/60 bg-slate-800/40 p-6">
+        <h1 className="text-lg font-bold text-slate-100 tracking-tight mb-1">
+          Regime-Switching Trading System
+        </h1>
+        <p className="text-sm text-slate-400 leading-relaxed">
+          A research platform for developing and evaluating regime-conditioned predictive models
+          on equity and crypto price series. The system detects the current market regime in real time,
+          routes predictions to the model trained for that regime, and executes a shared-capital
+          portfolio strategy with realistic broker simulation.
+        </p>
+      </div>
+
+      {/* ── Regime → Model routing ── */}
+      <Panel title="Regime Detection & Model Routing">
+        <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+          Regime is determined at every bar using three signals: realised vol_20 expanding percentile
+          (above median → HIGH_VOL), 200-day SMA ratio (above 1.0 → BULL), and optionally TDA L1
+          persistence. Each regime routes to a dedicated model trained exclusively on windows from
+          that regime.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {REGIMES.map(r => (
+            <div key={r.name} className={`rounded-lg border p-4 ${r.bg}`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className={`text-xs font-bold font-mono ${r.color}`}>{r.name}</span>
+                <span className="text-xs text-slate-400 font-mono bg-slate-800/60 px-2 py-0.5 rounded">
+                  {r.model}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">{r.desc}</p>
+            </div>
           ))}
-          {activeTicker && (
-            <span className="text-xs text-slate-600">
-              showing live data from <span className="text-slate-400">{activeTicker}</span>
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* ── Metrics row ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <MetricsCards summary={summary} />
-      </div>
-
-      {/* ── Equity + Drawdown ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Panel title={activeTicker ? `Equity — ${activeTicker} (paper)` : 'Equity Curve'}>
-          <PnLChart data={pnlData} />
-        </Panel>
-        <Panel title="Drawdown">
-          <DrawdownChart data={pnlData} />
-        </Panel>
-      </div>
-
-      {/* ── Live signals ── */}
-      <Panel title={`Live Signals${allSignals.length > 0 ? ` · ${allSignals.length}` : ''}`}>
-        <div className="flex items-center gap-2 mb-3">
-          <input
-            className="inp w-28 text-xs py-1"
-            value={histInput}
-            onChange={e => setHistInput(e.target.value.toUpperCase())}
-            onKeyDown={e => e.key === 'Enter' && setHistSymbol(histInput)}
-            placeholder="AAPL"
-          />
-          <button
-            onClick={() => setHistSymbol(histInput)}
-            disabled={histLoad}
-            className="flex items-center gap-1 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600
-                       text-slate-300 text-xs font-semibold transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={11} className={histLoad ? 'animate-spin' : ''} />
-            Load history
-          </button>
-          <span className="text-xs text-slate-600">· new signals appear via WebSocket</span>
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <SignalChart signals={allSignals} />
-          <SignalFeed  signals={allSignals} />
         </div>
       </Panel>
 
-      {/* ── Positions ── */}
-      <Panel title="Open Positions">
-        <PositionsTable positions={positions} />
+      {/* ── Features ── */}
+      <Panel title="Feature Pipeline">
+        <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+          Features are computed bar-by-bar from raw OHLCV data. TDA features require{' '}
+          <span className="text-slate-300 font-mono">use_tda=true</span>; macro features require{' '}
+          <span className="text-slate-300 font-mono">use_macro=true</span>. All features are
+          z-scored over a rolling window before being fed to the model.
+        </p>
+        <div className="divide-y divide-slate-700/50">
+          {FEATURES.map(f => (
+            <div key={f.name} className="flex gap-3 py-2.5">
+              <span className="text-xs font-mono text-blue-400 w-36 shrink-0 pt-px">{f.name}</span>
+              <span className="text-xs text-slate-400 leading-relaxed">{f.desc}</span>
+            </div>
+          ))}
+        </div>
+      </Panel>
+
+      {/* ── Portfolio engine ── */}
+      <Panel title="Portfolio Engine">
+        <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+          The shared-capital portfolio engine runs a single bar-by-bar simulation across all tickers.
+          All four allocation rules operate simultaneously; their combined effect determines how much
+          capital each ticker receives on any given bar.
+        </p>
+        <div className="space-y-3">
+          {PORTFOLIO_RULES.map(r => (
+            <div key={r.title} className="flex gap-3 rounded-lg bg-slate-800/50 border border-slate-700/40 p-3">
+              {r.icon}
+              <div>
+                <div className="text-xs font-semibold text-slate-200 mb-0.5">{r.title}</div>
+                <div className="text-xs text-slate-400 leading-relaxed">{r.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+
+      {/* ── Navigation guide ── */}
+      <Panel title="Navigation">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {[
+            { icon: <Cpu size={14} className="text-slate-400" />,        label: 'Predict',   desc: 'Run a single-ticker prediction for a given date range and horizon.' },
+            { icon: <BarChart2 size={14} className="text-slate-400" />,  label: 'Backtest',  desc: 'Single-asset or multi-asset shared-capital portfolio backtest with Monte Carlo simulation.' },
+            { icon: <FlaskConical size={14} className="text-slate-400" />,label: 'Benchmark', desc: 'Head-to-head comparison of all four models on the same ticker and date range.' },
+            { icon: <BrainCircuit size={14} className="text-slate-400" />,label: 'Train',     desc: 'Train and save a regime-conditioned model artifact for use in backtests or predictions.' },
+          ].map(n => (
+            <div key={n.label} className="flex gap-3 items-start rounded-lg bg-slate-800/50 border border-slate-700/40 p-3">
+              <span className="mt-0.5">{n.icon}</span>
+              <div>
+                <div className="text-xs font-semibold text-slate-200 mb-0.5">{n.label}</div>
+                <div className="text-xs text-slate-400 leading-relaxed">{n.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
       </Panel>
 
     </div>

@@ -53,8 +53,6 @@ from src.api.schemas import (
     HealthResponse,
     MetricRecord,
     MetricsResponse,
-    PaperStartRequest,
-    PaperStatusResponse,
     PortfolioBacktestRequest,
     PortfolioBacktestResponse,
     PositionRecord,
@@ -75,7 +73,6 @@ from src.api.schemas import (
 
 _jobs:            dict[str, TrainResponse] = {}
 _cancelled_jobs:  set[str] = set()
-_paper_engines:   dict[str, object] = {}   # ticker → PaperEngine
 
 
 # ──────────────────────────── Lifespan ─────────────────────────────────────
@@ -159,36 +156,9 @@ async def ws_signals(websocket: WebSocket):
 
 # ──────────────────────────── Summary / PnL (dashboard widgets) ─────────────
 
-def _best_paper_engine():
-    """Return the running paper engine with the most bars, or None."""
-    best = None
-    for pe in _paper_engines.values():
-        s = pe.status()
-        if s["running"] and (best is None or s["bar_count"] > best.status()["bar_count"]):
-            best = pe
-    return best
-
-
 @app.get("/summary", tags=["analytics"])
 def get_summary(db=Depends(get_db_optional)):
-    """Live paper engine portfolio → DB metrics → zeros fallback."""
-    # 1. Prefer a running paper engine
-    pe = _best_paper_engine()
-    if pe is not None:
-        s = pe.status()
-        p = s["portfolio"]
-        return {
-            "run_id":       f"paper:{pe.ticker}",
-            "ticker":       pe.ticker,
-            "sharpe":       p.get("sharpe", 0.0),
-            "total_return": p.get("total_return", 0.0),
-            "max_drawdown": p.get("max_drawdown", 0.0),
-            "win_rate":     0.0,      # not tracked in portfolio
-            "n_trades":     s["n_orders"],
-            "regime":       "",
-            "model_used":   "",
-        }
-    # 2. Fall back to latest DB metric
+    """Latest DB metric → zeros fallback."""
     if db is not None:
         try:
             records = db.get_metrics(limit=1)
@@ -217,14 +187,7 @@ def get_summary(db=Depends(get_db_optional)):
 
 @app.get("/pnl", tags=["analytics"])
 def get_pnl(ticker: Optional[str] = Query(None), db=Depends(get_db_optional)):
-    """Live paper engine equity curve → DB metric curve → empty fallback."""
-    # 1. Prefer paper engine equity history
-    pe = _paper_engines.get(ticker.upper()) if ticker else _best_paper_engine()
-    if pe is not None:
-        history = pe.status().get("equity_history", [])
-        if history:
-            return history
-    # 2. Fall back to synthetic curve from DB metrics
+    """Synthetic equity curve from DB metrics → empty fallback."""
     if db is not None:
         try:
             records = db.get_metrics(limit=200)
@@ -1391,120 +1354,6 @@ def portfolio_backtest(req: PortfolioBacktestRequest, background_tasks: Backgrou
         initial_capital        = req.initial_capital,
         timestamp              = datetime.now(timezone.utc),
     )
-
-
-# ──────────────────────────── Paper Trading ────────────────────────────────
-
-@app.post("/paper/start", response_model=PaperStatusResponse,
-          status_code=202, tags=["execution"])
-def paper_start(req: PaperStartRequest):
-    """Start a paper trading engine for a ticker in the background."""
-    from src.execution.paper_engine import PaperEngine, PaperConfig
-
-    if req.ticker in _paper_engines:
-        existing = _paper_engines[req.ticker]
-        if existing.status()["running"]:
-            raise HTTPException(status_code=409,
-                                detail=f"Paper engine for {req.ticker} already running")
-
-    cfg = PaperConfig(
-        interval             = req.interval,
-        broker_preset        = req.broker_preset,
-        initial_capital      = req.initial_capital,
-        prediction_interval  = req.prediction_interval,
-        max_drawdown_limit   = req.max_drawdown_limit,
-        stop_loss_pct        = req.stop_loss_pct,
-        latency_ms           = req.latency_ms,
-        max_position_pct     = req.max_position_pct,
-        max_leverage         = req.max_leverage,
-        rebalance_threshold  = req.rebalance_threshold,
-    )
-
-    # Load pre-fitted model if provided
-    model = None
-    artifacts = get_artifacts_optional()
-    if req.model_path and artifacts:
-        try:
-            model = artifacts.load(req.model_path)
-        except Exception:
-            pass
-
-    pe = PaperEngine(ticker=req.ticker, model=model, config=cfg)
-    pe.start()
-    _paper_engines[req.ticker] = pe
-
-    s = pe.status()
-    return PaperStatusResponse(
-        ticker      = req.ticker,
-        running     = s["running"],
-        bar_count   = s["bar_count"],
-        last_bar_ts = s["last_bar_ts"],
-        n_orders    = s["n_orders"],
-        portfolio   = s["portfolio"],
-        risk_status = s["risk_status"],
-        cost_summary= s["cost_summary"],
-        timestamp   = datetime.now(timezone.utc),
-    )
-
-
-@app.get("/paper/{ticker}/equity", tags=["execution"])
-def paper_equity(ticker: str):
-    """Full equity-curve history for a paper engine (for the dashboard PnL chart).
-    Also snapshots current equity so the chart grows on every dashboard poll."""
-    pe = _paper_engines.get(ticker.upper())
-    if pe is None:
-        raise HTTPException(status_code=404, detail=f"No paper engine for {ticker.upper()}")
-    pe.snapshot_equity()   # add a point for this moment in time
-    return pe.status().get("equity_history", [])
-
-
-@app.get("/paper/{ticker}/status", response_model=PaperStatusResponse, tags=["execution"])
-def paper_status(ticker: str):
-    """Get current status of a running paper engine."""
-    pe = _paper_engines.get(ticker.upper())
-    if pe is None:
-        raise HTTPException(status_code=404, detail=f"No paper engine for {ticker.upper()}")
-    s = pe.status()
-    return PaperStatusResponse(
-        ticker      = ticker.upper(),
-        running     = s["running"],
-        bar_count   = s["bar_count"],
-        last_bar_ts = s["last_bar_ts"],
-        n_orders    = s["n_orders"],
-        portfolio   = s["portfolio"],
-        risk_status = s["risk_status"],
-        cost_summary= s["cost_summary"],
-        timestamp   = datetime.now(timezone.utc),
-    )
-
-
-@app.post("/paper/{ticker}/stop", tags=["execution"])
-def paper_stop(ticker: str):
-    """Stop a running paper engine."""
-    pe = _paper_engines.get(ticker.upper())
-    if pe is None:
-        raise HTTPException(status_code=404, detail=f"No paper engine for {ticker.upper()}")
-    pe.stop()
-    s = pe.status()
-    return {
-        "ticker":    ticker.upper(),
-        "running":   s["running"],
-        "portfolio": s["portfolio"],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-@app.get("/paper", tags=["execution"])
-def paper_list():
-    """List all paper engines and their running state."""
-    return {
-        "engines": [
-            {"ticker": t, "running": pe.status()["running"],
-             "bar_count": pe.status()["bar_count"]}
-            for t, pe in _paper_engines.items()
-        ],
-        "count": len(_paper_engines),
-    }
 
 
 # ──────────────────────────── Model Benchmark ──────────────────────────────

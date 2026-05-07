@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   LayoutDashboard, Cpu, BarChart2, BrainCircuit,
-  PlayCircle, Server, Wifi, WifiOff, FlaskConical,
+  Server, Wifi, WifiOff, FlaskConical,
 } from 'lucide-react'
 import { useSignalStream } from './hooks/useSignalStream'
 import { DashboardPage }   from './pages/DashboardPage'
@@ -9,12 +9,11 @@ import { PredictPage }     from './pages/PredictPage'
 import { BacktestPage }    from './pages/BacktestPage'
 import { BenchmarkPage }   from './pages/BenchmarkPage'
 import { TrainPage }       from './pages/TrainPage'
-import { PaperPage }       from './pages/PaperPage'
 import { SystemPage }      from './pages/SystemPage'
 import { ActiveOpsProvider } from './contexts/ActiveOpsContext'
 import { ActiveOpsBar }      from './components/ActiveOpsBar'
 
-type Tab = 'dashboard' | 'predict' | 'backtest' | 'benchmark' | 'train' | 'paper' | 'system'
+type Tab = 'dashboard' | 'predict' | 'backtest' | 'benchmark' | 'train' | 'system'
 
 const NAV: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard',  label: 'Dashboard',    icon: <LayoutDashboard size={15} /> },
@@ -22,7 +21,6 @@ const NAV: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'backtest',   label: 'Backtest',     icon: <BarChart2       size={15} /> },
   { id: 'benchmark',  label: 'Benchmark',    icon: <FlaskConical    size={15} /> },
   { id: 'train',      label: 'Train',        icon: <BrainCircuit    size={15} /> },
-  { id: 'paper',      label: 'Paper Trade',  icon: <PlayCircle      size={15} /> },
   { id: 'system',     label: 'System',       icon: <Server          size={15} /> },
 ]
 
@@ -73,12 +71,11 @@ function AppShell() {
 
         {/* ── Page content ─────────────────────────────────────────────────── */}
         <main className="flex-1 overflow-y-auto p-5">
-          {tab === 'dashboard'  && <DashboardPage signals={signals} />}
+          {tab === 'dashboard'  && <DashboardPage />}
           {tab === 'predict'    && <PredictPage   />}
           {tab === 'backtest'   && <BacktestPage  />}
           {tab === 'benchmark'  && <BenchmarkPage />}
           {tab === 'train'      && <TrainPage     />}
-          {tab === 'paper'      && <PaperPage     />}
           {tab === 'system'     && <SystemPage    />}
         </main>
 

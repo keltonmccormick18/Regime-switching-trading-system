@@ -3,7 +3,6 @@ import type {
   BenchmarkRequest, BenchmarkResponse,
   HealthResponse,
   MetricsSummary, PnLPoint, Position,
-  PaperStartRequest, PaperStatusResponse, PaperListItem,
   PortfolioBacktestRequest, PortfolioBacktestResponse,
   PredictRequest, PredictResponse,
   RegimeResponse,
@@ -69,10 +68,4 @@ export const api = {
   trainList:   ()                   => get<{ jobs: TrainResponse[]; count: number }>('/train'),
   trainCancel: (jobId: string)      => req<TrainResponse>(`/train/${jobId}`, { method: 'DELETE' }),
 
-  // ── Paper trading ─────────────────────────────────────────────────────────
-  paperStart:  (body: PaperStartRequest) => post<PaperStatusResponse>('/paper/start', body),
-  paperStatus: (ticker: string)          => get<PaperStatusResponse>(`/paper/${ticker}/status`),
-  paperEquity: (ticker: string)          => get<PnLPoint[]>(`/paper/${ticker}/equity`),
-  paperStop:   (ticker: string)          => post<{ running: boolean }>(`/paper/${ticker}/stop`, {}),
-  paperList:   ()                        => get<{ engines: PaperListItem[]; count: number }>('/paper'),
 }

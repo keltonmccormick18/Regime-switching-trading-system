@@ -26,7 +26,7 @@ const REGIMES = [
     model: 'TFTModel',
     color: 'text-blue-400',
     bg:    'bg-blue-900/20 border-blue-800/40',
-    desc:  'Elevated volatility, price above 200-day SMA. The Temporal Fusion Transformer's multi-head attention excels at non-linear, spike-driven price action in volatile bull runs.',
+    desc:  "Elevated volatility, price above 200-day SMA. The Temporal Fusion Transformer's multi-head attention excels at non-linear, spike-driven price action in volatile bull runs.",
   },
   {
     name:  'HIGH_VOL_BEAR',

@@ -1,0 +1,40 @@
+# ── Python ───────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+
+# ── Environment / secrets ─────────────────────
+.env
+.env.*
+!.env.example
+
+# ── TLS certificates (never commit private keys) ─
+certs/server.key
+certs/server.crt
+certs/openssl.cnf
+
+# ── Node / frontend ───────────────────────────
+node_modules/
+dashboard/frontend/node_modules/
+dashboard/frontend/dist/
+dashboard/frontend/.vite/
+
+# ── ML artifacts ──────────────────────────────
+artifacts/models/*.pt
+artifacts/models/*.pkl
+artifacts/models/*.json
+data/raw/
+data/processed/
+
+# ── macOS ─────────────────────────────────────
+.DS_Store
+
+# ── Claude Code session files ─────────────────
+.claude/

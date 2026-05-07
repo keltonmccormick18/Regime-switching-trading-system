@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+
+body {
+  background-color: #0f172a;
+  color: #f1f5f9;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Recharts tooltip inherits body font */
+.recharts-tooltip-wrapper { font-family: ui-monospace, monospace; }
+
+/* Shared form input / select style used across all pages */
+@layer components {
+  .inp {
+    @apply w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5
+           text-sm text-slate-200 placeholder-slate-500
+           focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent
+           transition-colors;
+  }
+}

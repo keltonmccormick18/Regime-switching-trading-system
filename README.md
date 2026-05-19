@@ -21,15 +21,17 @@ Backtested on AAPL (2010–2024), 20 Monte Carlo runs, walk-forward validation (
 | Beta | 0.82 ± 0.01 | — |
  
 ### Ablation Study
+
+Ablation Study Table:
+
+|    Configuration      | Sharpe | Return | Max DD |
+|------------------------|--------|--------|--------|
+|      Full system       | 1.25 | +138.8% | −19.3% |
+|  Without TDA features  | 1.08 | +112.1% | −22.0% |
+| Without 200-SMA filter  | 0.86 | +81.7% | −22.3% |
+| Single model (TCN only) | 0.23 | +2.1%  | −5.0%  |
  
-| Configuration | Sharpe | Return | Max DD |
-|---|---|---|---|
-| Full system | 1.25 | +138.8% | −19.3% |
-| Without TDA features | 1.08 | +112.1% | −22.0% |
-| Without 200-SMA filter | 0.86 | +81.7% | −22.3% |
-| Single model (TCN only) | 0.23 | +2.1% | −5.0% |
- 
-TDA features contribute roughly 0.17 Sharpe and 27 percentage points of return. Regime routing is by far the largest contributor — a single TCN trained on all regimes collapses to near-zero return.
+TDA features contribute roughly 0.17 Sharpe and 27 percentage points of return. Regime routing is by far the largest contributor, as evidenced by the single TCN trained on all regimes collapsing to near-zero return.
  
 ![Dashboard — equity curve with regime overlays, Monte Carlo P10/P90 bands, and performance metrics](aaplexample.png)
  
@@ -41,7 +43,8 @@ TDA features contribute roughly 0.17 Sharpe and 27 percentage points of return. 
  
 Each bar is classified into one of four regimes using two signals:
 - **Volatility:** 20-bar realized volatility ranked against the expanding empirical CDF (adapts to full history, avoids look-ahead bias)
-- **Trend:** price relative to the 200-day SMA
+- **Trend:** price relative to the 200-day SMA:
+
 | Regime | Condition | Assigned Model | Rationale |
 |---|---|---|---|
 | LOW_VOL_BULL | Vol percentile < 0.5, price ≥ SMA₂₀₀ | TCN | Stable trending conditions favor multi-scale momentum capture via dilated convolutions |
